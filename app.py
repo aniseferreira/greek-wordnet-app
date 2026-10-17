@@ -1,5 +1,5 @@
 import streamlit as st
-import spacy
+import stanza
 import pandas as pd
 import requests
 import urllib.parse
@@ -22,24 +22,23 @@ LABEL_MAP = {
 }
 
 # -----------------------------------------------------------------------------
-# 1. CARREGAMENTO LEVE DE MODELOS (spaCy + Hugging Face)
+# 1. CARREGAMENTO E CACHE DOS MODELOS
 # -----------------------------------------------------------------------------
 @st.cache_resource
-def load_spacy_greek():
-    """Carrega o modelo ultra-leve do spaCy para Grego Antigo."""
-    return spacy.load("grc_proiel_sm")
+def load_stanza():
+    stanza.download('grc', verbose=False)
+    return stanza.Pipeline('grc', processors='tokenize,mwt,pos,lemma', verbose=False)
 
 @st.cache_resource
 def load_sentiment_model():
-    """Carrega o modelo de sentimento via pipeline leve."""
     return pipeline(
         "sentiment-analysis",
         model="nlpaueb/bert-base-greek-uncased-v1",
         top_k=None
     )
 
-with st.spinner("Carregando pipeline NLP otimizada para Grego Antigo..."):
-    nlp = load_spacy_greek()
+with st.spinner("Carregando modelos de NLP em Grego Antigo..."):
+    stanza_nlp = load_stanza()
     sentiment_nlp = load_sentiment_model()
 
 # -----------------------------------------------------------------------------
@@ -50,12 +49,12 @@ def remove_diacritics(text):
     return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 def query_agwn_endpoint(lemma_str):
-    """Consulta à API oficial do AGWN com tratamento de URL."""
+    """Realiza a requisição HTTP pura ao servidor do AGWN."""
     encoded = urllib.parse.quote(lemma_str)
     url = f"https://greekwordnet.chs.harvard.edu/api/lemma/{encoded}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        resp = requests.get(url, headers=headers, timeout=3)
+        resp = requests.get(url, headers=headers, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
             items = data if isinstance(data, list) else data.get("synsets", [])
@@ -71,14 +70,15 @@ def query_agwn_endpoint(lemma_str):
     return None
 
 def get_agwn_synsets(lemma):
+    """Tenta buscar com acentos; se falhar, tenta sem acentos/diacríticos."""
     lemma_clean = lemma.strip().lower()
     
-    # 1ª tentativa com o lema original
+    # 1ª Tentativa: Lema original do Stanza
     res = query_agwn_endpoint(lemma_clean)
     if res:
         return res
     
-    # 2ª tentativa sem acentos
+    # 2ª Tentativa: Lema sem diacríticos (acentos/espíritos)
     lemma_no_accents = remove_diacritics(lemma_clean)
     if lemma_no_accents != lemma_clean:
         res = query_agwn_endpoint(lemma_no_accents)
@@ -99,35 +99,34 @@ if st.button("🚀 Processar Texto", type="primary"):
     if not text_input.strip():
         st.warning("Por favor, insira um texto em Grego Antigo.")
     else:
-        # A) PROCESSAMENTO MORFOLÓGICO VIA SPACY
-        doc = nlp(text_input)
+        # A) PROCESSAMENTO MORFOLÓGICO & CONSULTA AGWN
+        doc = stanza_nlp(text_input)
         parsed_results = []
         all_lemmas = []
 
-        tokens = [token for token in doc if not token.is_punct and not token.is_space]
-        total_tokens = len(tokens)
+        progress_bar = st.progress(0, text="Consultando API do Ancient Greek WordNet...")
+        words = [word for sentence in doc.sentences for word in sentence.words if word.upos != 'PUNCT']
+        total_words = len(words)
 
-        progress_bar = st.progress(0, text="Lematizando e consultando a API do AGWN...")
-
-        for idx, token in enumerate(tokens):
-            lemma = token.lemma_ if token.lemma_ else token.text
+        for idx, word in enumerate(words):
+            lemma = word.lemma if word.lemma else word.text
             all_lemmas.append(lemma)
             
             synset_info = get_agwn_synsets(lemma)
             
             parsed_results.append({
-                "Palavra": token.text,
+                "Palavra": word.text,
                 "Lema": lemma,
-                "Classe (POS)": token.pos_,
+                "Classe (POS)": word.upos,
                 "Synsets (AGWN)": synset_info
             })
-            if total_tokens > 0:
-                progress_bar.progress((idx + 1) / total_tokens)
+            if total_words > 0:
+                progress_bar.progress((idx + 1) / total_words)
         
         progress_bar.empty()
         df_agwn = pd.DataFrame(parsed_results)
 
-        # B) ANÁLISE DE SENTIMENTO
+        # B) ANÁLISE DE SENTIMENTO COM RÓTULOS MAPEADOS
         lemmatized_text = " ".join(all_lemmas)
         
         raw_output = sentiment_nlp(text_input)
@@ -136,7 +135,7 @@ if st.button("🚀 Processar Texto", type="primary"):
         raw_sentiment = raw_output[0] if isinstance(raw_output[0], list) else raw_output
         lemma_sentiment = lemma_output[0] if isinstance(lemma_output[0], list) else lemma_output
 
-        # Formatação e mapeamento de rótulos
+        # Aplicação da renomeação dos rótulos
         df_raw = pd.DataFrame(raw_sentiment)
         df_raw['label'] = df_raw['label'].map(lambda x: LABEL_MAP.get(x, x))
         if 'score' in df_raw.columns:
@@ -148,12 +147,12 @@ if st.button("🚀 Processar Texto", type="primary"):
             df_lem['score'] = df_lem['score'].apply(lambda x: f"{x * 100:.2f}%")
 
         # -----------------------------------------------------------------------------
-        # 4. EXIBIÇÃO DE RESULTADOS
+        # 4. EXIBIÇÃO
         # -----------------------------------------------------------------------------
         tab1, tab2 = st.tabs(["📚 Synsets do AGWN", "💭 Análise de Sentimento"])
 
         with tab1:
-            st.subheader("Lematização (spaCy) e Synsets (AGWN API)")
+            st.subheader("Lematização e Synsets")
             st.dataframe(df_agwn, use_container_width=True)
 
         with tab2:
