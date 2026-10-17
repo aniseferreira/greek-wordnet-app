@@ -12,7 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Mapeamento explícito de rótulos de sentimento
+# Mapeamento de rótulos de sentimento
 LABEL_MAP = {
     "LABEL_0": "LABEL_0 (Negativo)",
     "LABEL_1": "LABEL_1 (Positivo)",
@@ -22,28 +22,34 @@ LABEL_MAP = {
 }
 
 # -----------------------------------------------------------------------------
-# 1. CARREGAMENTO LEVE DE MODELOS (spaCy + Hugging Face)
+# 1. CARREGAMENTO COM DOWNLOAD AUTOMÁTICO DO MODELO SPACY
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_spacy_greek():
-    """Carrega o modelo ultra-leve do spaCy para Grego Antigo."""
-    return spacy.load("grc_proiel_sm")
+    """Garante o download e carregamento do modelo de Grego Antigo no spaCy."""
+    model_name = "grc_proiel_sm"
+    try:
+        return spacy.load(model_name)
+    except OSError:
+        # Se o modelo não estiver instalado, baixa automaticamente via CLI do spaCy
+        spacy.cli.download(model_name)
+        return spacy.load(model_name)
 
 @st.cache_resource
 def load_sentiment_model():
-    """Carrega o modelo de sentimento via pipeline leve."""
+    """Carrega o modelo de sentimento via pipeline da Hugging Face."""
     return pipeline(
         "sentiment-analysis",
         model="nlpaueb/bert-base-greek-uncased-v1",
         top_k=None
     )
 
-with st.spinner("Carregando pipeline NLP otimizada para Grego Antigo..."):
+with st.spinner("Instalando e carregando modelos de NLP em Grego Antigo..."):
     nlp = load_spacy_greek()
     sentiment_nlp = load_sentiment_model()
 
 # -----------------------------------------------------------------------------
-# 2. CONSULTA ROBUSTA À API DO ANCIENT GREEK WORDNET
+# 2. CONSULTA À API DO ANCIENT GREEK WORDNET
 # -----------------------------------------------------------------------------
 def remove_diacritics(text):
     """Remove acentos e espíritos do grego para busca de fallback."""
@@ -53,7 +59,7 @@ def query_agwn_endpoint(lemma_str):
     """Consulta à API oficial do AGWN com tratamento de URL."""
     encoded = urllib.parse.quote(lemma_str)
     url = f"https://greekwordnet.chs.harvard.edu/api/lemma/{encoded}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         resp = requests.get(url, headers=headers, timeout=3)
         if resp.status_code == 200:
@@ -73,12 +79,12 @@ def query_agwn_endpoint(lemma_str):
 def get_agwn_synsets(lemma):
     lemma_clean = lemma.strip().lower()
     
-    # 1ª tentativa com o lema original
+    # 1ª tentativa com lema original
     res = query_agwn_endpoint(lemma_clean)
     if res:
         return res
     
-    # 2ª tentativa sem acentos
+    # 2ª tentativa sem acentos/diacríticos
     lemma_no_accents = remove_diacritics(lemma_clean)
     if lemma_no_accents != lemma_clean:
         res = query_agwn_endpoint(lemma_no_accents)
@@ -136,7 +142,6 @@ if st.button("🚀 Processar Texto", type="primary"):
         raw_sentiment = raw_output[0] if isinstance(raw_output[0], list) else raw_output
         lemma_sentiment = lemma_output[0] if isinstance(lemma_output[0], list) else lemma_output
 
-        # Formatação e mapeamento de rótulos
         df_raw = pd.DataFrame(raw_sentiment)
         df_raw['label'] = df_raw['label'].map(lambda x: LABEL_MAP.get(x, x))
         if 'score' in df_raw.columns:
