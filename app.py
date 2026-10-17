@@ -16,15 +16,16 @@ st.set_page_config(
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def setup_nlp():
-    """Baixa e carrega o pipeline do Stanza para Grego Antigo (grc)."""
-    stanza.download('grc', verbose=False)
-    # Download dos dados do WordNet pelo NLTK
+    """Garante o download dos pacotes do NLTK e do Stanza."""
+    # Downloads do NLTK necessários para suporte multilingual ao WordNet
     nltk.download('wordnet', quiet=True)
     nltk.download('omw-1.4', quiet=True)
+    nltk.download('omw', quiet=True)
+    
+    # Download e inicialização do Stanza para Grego Antigo
+    stanza.download('grc', verbose=False)
+    
     return stanza.Pipeline('grc', processors='tokenize,mwt,pos,lemma', verbose=False)
-
-with st.spinner("Carregando modelos de NLP em Grego Antigo... (pode demorar na primeira execução)"):
-    nlp = setup_nlp()
 
 # -----------------------------------------------------------------------------
 # 2. INTERFACE PRINCIPAL
