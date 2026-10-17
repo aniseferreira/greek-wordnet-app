@@ -4,7 +4,7 @@ import nltk
 from nltk.corpus import wordnet as wn
 import pandas as pd
 
-# Configuração da página
+# Configuração inicial da página
 st.set_page_config(
     page_title="Ancient Greek WordNet & Sentiment",
     page_icon="🏛️",
@@ -12,24 +12,24 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# 1. CARREGAMENTO E CACHING DE MODELOS
+# 1. DOWNLOAD E CARREGAMENTO DE MODELOS (COM CACHE)
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def setup_nlp():
-    """Garante o download dos pacotes do NLTK e do Stanza."""
-    # Downloads do NLTK para o WordNet
+    """Baixa e carrega todos os recursos necessários do NLTK e Stanza."""
+    # Downloads explícitos do NLTK para WordNet Multilíngue (OMW)
     nltk.download('wordnet', quiet=True)
     nltk.download('omw-1.4', quiet=True)
     nltk.download('omw', quiet=True)
+    nltk.download('extended_omw', quiet=True)
     
-    # Download do pacote de Grego Antigo
+    # Download e inicialização do pipeline do Stanza para Grego Antigo
     stanza.download('grc', verbose=False)
     
-    # Retorna o pipeline inicializado
     return stanza.Pipeline('grc', processors='tokenize,mwt,pos,lemma', verbose=False)
 
-# ESTA LINHA É CRUCIAL: Atribui o retorno da função à variável global `nlp`
-with st.spinner("Carregando modelos de NLP em Grego Antigo..."):
+# Inicialização global do pipeline
+with st.spinner("Carregando modelos de NLP em Grego Antigo e WordNet..."):
     nlp = setup_nlp()
 
 # -----------------------------------------------------------------------------
@@ -38,13 +38,12 @@ with st.spinner("Carregando modelos de NLP em Grego Antigo..."):
 st.title("🏛️ Ancient Greek NLP: Synsets & Sentiment App")
 st.markdown("""
 Esta aplicação realiza a **lematização de textos em Grego Antigo**, mapeia os **synsets** no WordNet 
-e permite estimar termos relevantes para análise semântica e de sentimentos.
+e organiza o vocabulário para análises semânticas.
 """)
 
 st.sidebar.header("Configurações")
 max_synsets = st.sidebar.slider("Máx. de Synsets por Lema:", 1, 5, 2)
 
-# Exemplo padrão: Canto I da Ilíada ("Canta, ó deusa, a cólera de Aquiles...")
 default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
 text_input = st.text_area("Insira o texto em Grego Antigo:", value=default_text, height=120)
 
@@ -66,13 +65,22 @@ if st.button("🚀 Processar Texto", type="primary"):
                 pos = word.upos
                 all_lemmas.append(lemma)
                 
-                # Consulta no WordNet pelo lema (código de idioma 'grc' ou 'ell')
-                synsets = wn.synsets(lemma, lang='grc') if hasattr(wn, 'synsets') else []
-                
+                # Busca de Synsets com tratamento seguro de erros
+                synsets = []
+                try:
+                    # Tenta buscar usando o código do idioma grego antigo / moderno no OMW
+                    synsets = wn.synsets(lemma, lang='grc')
+                except Exception:
+                    try:
+                        synsets = wn.synsets(lemma, lang='ell')
+                    except Exception:
+                        synsets = []
+
                 synset_info = []
-                for s in synsets[:max_synsets]:
-                    defn = s.definition()
-                    synset_info.append(f"**{s.name()}**: _{defn}_")
+                if synsets:
+                    for s in synsets[:max_synsets]:
+                        defn = s.definition()
+                        synset_info.append(f"**{s.name()}**: _{defn}_")
                 
                 parsed_data.append({
                     "Palavra Original": word.text,
@@ -109,9 +117,7 @@ if st.button("🚀 Processar Texto", type="primary"):
             st.markdown("""
             > **Nota sobre Sentimento em Grego Antigo:**  
             > Como os lemas já foram isolados, você pode correlacionar esta lista com um léxico de polaridade 
-            > (ex: *Ancient Greek Sentiment Lexicon*) ou passar os lemas lematizados para modelos de Embeddings/BERT.
+            > ou passar os lemas para modelos de Embeddings.
             """)
-            
-            # Exemplo conceitual de busca por lemas com carga emocional forte
             st.write("**Visualização do Texto Lematizado:**")
             st.code(" ".join(all_lemmas), language="text")
