@@ -7,7 +7,7 @@ import unicodedata
 from transformers import pipeline
 
 st.set_page_config(
-    page_title="Ancient Greek Engine: AGWN & Sentiment",
+    page_title="Ancient Greek Engine: Wordnet & Sentimento",
     page_icon="🏛️",
     layout="wide"
 )
