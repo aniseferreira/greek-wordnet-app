@@ -2,49 +2,54 @@ import streamlit as st
 import stanza
 import pandas as pd
 import requests
+import urllib.parse
 from transformers import pipeline
 
 st.set_page_config(
-    page_title="Ancient Greek Engine: WordNet API & Sentiment",
+    page_title="Ancient Greek Engine: AGWN & Sentiment",
     page_icon="🏛️",
     layout="wide"
 )
 
 # -----------------------------------------------------------------------------
-# 1. CARREGAMENTO E CACHE DOS MODELOS (Stanza + Transformer)
+# 1. CARREGAMENTO E CACHE DOS MODELOS
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def load_stanza():
-    """Carrega o pipeline do Stanza para Grego Antigo."""
     stanza.download('grc', verbose=False)
     return stanza.Pipeline('grc', processors='tokenize,mwt,pos,lemma', verbose=False)
 
 @st.cache_resource
 def load_sentiment_model():
-    """Carrega o modelo Transformer da Hugging Face para análise de sentimento."""
+    # Carrega pipeline de análise de sentimento
     return pipeline(
         "sentiment-analysis",
         model="nlpaueb/bert-base-greek-uncased-v1",
-        return_all_scores=True
+        top_k=None # Retorna todos os rótulos de pontuação
     )
 
-with st.spinner("Inicializando Stanza e modelo de linguagem Hugging Face..."):
+with st.spinner("Carregando modelos de NLP em Grego Antigo..."):
     stanza_nlp = load_stanza()
     sentiment_nlp = load_sentiment_model()
 
 # -----------------------------------------------------------------------------
-# 2. FUNÇÃO DE CONSULTA À API DO ANCIENT GREEK WORDNET (HARVARD CHS)
+# 2. CONSULTA À API DO ANCIENT GREEK WORDNET / LOGEION
 # -----------------------------------------------------------------------------
 def get_agwn_synsets(lemma):
-    """Consulta a API oficial do Ancient Greek WordNet em Harvard."""
-    url = f"https://greekwordnet.chs.harvard.edu/api/lemma/{lemma}"
+    """Consulta os synsets/definições lexicográficas tratando diacríticos e conexões."""
+    encoded_lemma = urllib.parse.quote(lemma)
+    url = f"https://greekwordnet.chs.harvard.edu/api/lemma/{encoded_lemma}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StreamlitApp/1.0"
+    }
+    
     try:
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, headers=headers, timeout=6)
         if response.status_code == 200:
             data = response.json()
             synsets_found = []
             
-            # Trata respostas em lista ou dicionário da API
             items = data if isinstance(data, list) else data.get("synsets", [])
             for item in items:
                 synset_id = item.get("synset_id", item.get("id", "N/A"))
@@ -52,20 +57,16 @@ def get_agwn_synsets(lemma):
                 pos = item.get("pos", "")
                 synsets_found.append(f"**[{synset_id}]** ({pos}) {gloss}")
             
-            return " | ".join(synsets_found) if synsets_found else "Nenhum synset na API"
+            return " | ".join(synsets_found) if synsets_found else "Nenhum synset retornado"
         else:
-            return f"Não encontrado (HTTP {response.status_code})"
-    except Exception:
-        return "Erro de conexão com a API do AGWN"
+            return f"Não localizado na base (HTTP {response.status_code})"
+    except Exception as e:
+        return f"Sem resposta do servidor AGWN"
 
 # -----------------------------------------------------------------------------
 # 3. INTERFACE PRINCIPAL
 # -----------------------------------------------------------------------------
 st.title("🏛️ Ancient Greek Engine: AGWN API & Sentiment")
-st.markdown("""
-Esta aplicação realiza a **lematização**, consulta a **API oficial do Ancient Greek WordNet (Harvard CHS)** 
-e calcula a **polaridade de sentimento contextual** através de modelos Transformer.
-""")
 
 default_text = "Μῆνιν ἄειδε θεὰ Πηληϊάδεω Ἀχιλῆος"
 text_input = st.text_area("Insira o texto em Grego Antigo:", value=default_text, height=120)
@@ -74,7 +75,7 @@ if st.button("🚀 Processar com AGWN & Hugging Face", type="primary"):
     if not text_input.strip():
         st.warning("Por favor, insira um texto em Grego Antigo.")
     else:
-        # A) PROCESSAMENTO MORFOLÓGICO & CONSULTA AGWN
+        # A) PROCESSAMENTO MORFOLÓGICO & AGWN
         doc = stanza_nlp(text_input)
         parsed_results = []
         all_lemmas = []
@@ -88,7 +89,6 @@ if st.button("🚀 Processar com AGWN & Hugging Face", type="primary"):
             lemma = word.lemma if word.lemma else word.text
             all_lemmas.append(lemma)
             
-            # Chamada à API do Harvard AGWN pelo lema extraído
             agwn_data = get_agwn_synsets(lemma)
             
             parsed_results.append({
@@ -101,21 +101,22 @@ if st.button("🚀 Processar com AGWN & Hugging Face", type="primary"):
             progress_bar.progress((idx + 1) / total_words)
         
         progress_bar.empty()
-
         df_agwn = pd.DataFrame(parsed_results)
 
-        # B) ANÁLISE DE SENTIMENTO VIA TRANSFORMER (Contextual)
+        # B) ANÁLISE DE SENTIMENTO VIA TRANSFORMER (Tratamento Seguro)
         lemmatized_text = " ".join(all_lemmas)
         
-        # Sentimento da frase original
-        raw_sentiment = sentiment_nlp(text_input)[0]
-        # Sentimento da frase lematizada
-        lemma_sentiment = sentiment_nlp(lemmatized_text)[0]
+        raw_output = sentiment_nlp(text_input)
+        lemma_output = sentiment_nlp(lemmatized_text)
+
+        # Normalização dos dados para DataFrame do Pandas
+        raw_sentiment = raw_output[0] if isinstance(raw_output[0], list) else raw_output
+        lemma_sentiment = lemma_output[0] if isinstance(lemma_output[0], list) else lemma_output
 
         # -----------------------------------------------------------------------------
-        # 4. EXIBIÇÃO DOS RESULTADOS
+        # 4. EXIBIÇÃO DE RESULTADOS
         # -----------------------------------------------------------------------------
-        tab1, tab2 = st.tabs(["📚 Synsets do AGWN (Harvard)", "💭 Análise de Sentimento (Hugging Face)"])
+        tab1, tab2 = st.tabs(["📚 Synsets do AGWN", "💭 Análise de Sentimento (Hugging Face)"])
 
         with tab1:
             st.subheader("Lematização e Consulta à API do Ancient Greek WordNet")
@@ -125,22 +126,18 @@ if st.button("🚀 Processar com AGWN & Hugging Face", type="primary"):
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("Sentimento: Texto Original (Com Flexão)")
-                df_raw_sent = pd.DataFrame(raw_sentiment)
-                df_raw_sent['score'] = df_raw_sent['score'].apply(lambda x: f"{x * 100:.2f}%")
-                st.dataframe(df_raw_sent, use_container_width=True)
-                
-                top_raw = max(raw_sentiment, key=lambda x: x['score'])
-                st.info(f"**Classe Predominante:** {top_raw['label']} ({top_raw['score']*100:.1f}%)")
+                st.subheader("Sentimento: Texto Original")
+                df_raw = pd.DataFrame(raw_sentiment)
+                if 'score' in df_raw.columns:
+                    df_raw['score'] = df_raw['score'].apply(lambda x: f"{x * 100:.2f}%")
+                st.dataframe(df_raw, use_container_width=True)
 
             with col2:
                 st.subheader("Sentimento: Texto Lematizado")
-                df_lemma_sent = pd.DataFrame(lemma_sentiment)
-                df_lemma_sent['score'] = df_lemma_sent['score'].apply(lambda x: f"{x * 100:.2f}%")
-                st.dataframe(df_lemma_sent, use_container_width=True)
-                
-                top_lemma = max(lemma_sentiment, key=lambda x: x['score'])
-                st.info(f"**Classe Predominante:** {top_lemma['label']} ({top_lemma['score']*100:.1f}%)")
+                df_lem = pd.DataFrame(lemma_sentiment)
+                if 'score' in df_lem.columns:
+                    df_lem['score'] = df_lem['score'].apply(lambda x: f"{x * 100:.2f}%")
+                st.dataframe(df_lem, use_container_width=True)
 
             st.subheader("Texto Lematizado Unificado")
             st.code(lemmatized_text, language="text")
