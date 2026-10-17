@@ -17,15 +17,20 @@ st.set_page_config(
 @st.cache_resource
 def setup_nlp():
     """Garante o download dos pacotes do NLTK e do Stanza."""
-    # Downloads do NLTK necessários para suporte multilingual ao WordNet
+    # Downloads do NLTK para o WordNet
     nltk.download('wordnet', quiet=True)
     nltk.download('omw-1.4', quiet=True)
     nltk.download('omw', quiet=True)
     
-    # Download e inicialização do Stanza para Grego Antigo
+    # Download do pacote de Grego Antigo
     stanza.download('grc', verbose=False)
     
+    # Retorna o pipeline inicializado
     return stanza.Pipeline('grc', processors='tokenize,mwt,pos,lemma', verbose=False)
+
+# ESTA LINHA É CRUCIAL: Atribui o retorno da função à variável global `nlp`
+with st.spinner("Carregando modelos de NLP em Grego Antigo..."):
+    nlp = setup_nlp()
 
 # -----------------------------------------------------------------------------
 # 2. INTERFACE PRINCIPAL
