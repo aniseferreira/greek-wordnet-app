@@ -1,5 +1,6 @@
 streamlit>=1.30.0
 spacy>=3.7.0
+https://github.com/explosion/spacy-models/releases/download/grc_proiel_sm-3.7.0/grc_proiel_sm-3.7.0-py3-none-any.whl
 pandas>=2.0.0
 requests>=2.31.0
 torch>=2.0.0
